@@ -9,7 +9,7 @@ model = YOLO('yolov11s.pt')  # load a pretrained model (recommended for training
 
 #########################################################
 # Train the model
-model.train(data='../ultralytics/datasets/traffic_light.yaml', 
+model.train(data='../ultralytics/cfg/datasets/traffic_light.yaml', 
             name="traffic_yolov11_s_sgd",
             epochs=1, 
             imgsz=1280,  

@@ -6,7 +6,7 @@
 # ├── ultralytics
 # |   ├── tests
 # |   └── ultralytics
-# |       └── datasets 
+# |       └── cfg/datasets 
 # └── data
 #     └── detection  <- 신호등 인식
 #     |   └── train 
