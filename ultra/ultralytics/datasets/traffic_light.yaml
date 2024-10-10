@@ -13,7 +13,7 @@
 #     |   └── val  
 #     |   └── test
 #     |
-#     └── semantic   <- 객체복합상태인식
+#     └── segmantation   <- 객체복합상태인식
 #         └── train 
 #         └── val  
 #         └── test

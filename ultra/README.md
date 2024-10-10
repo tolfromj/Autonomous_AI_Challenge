@@ -29,12 +29,12 @@ pip install -e .
 #     |   └── val  
 #     |   └── test
 #     |
-#     └── semantic   <- 객체복합상태인식
+#     └── segmantation   <- 객체복합상태인식
 #         └── train 
 #         └── val  
 #         └── test
 
-python split_dataset.py --data_path ../data/detection
+python split_dataset_traffic_light.py --data_path ../data/detection
 ```
 
 ## 3. Edit dataset root dir
