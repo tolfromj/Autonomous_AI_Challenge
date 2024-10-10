@@ -83,9 +83,9 @@ def split_dataset(directory):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--data_path", type=str, default="../data/traffic_light"   
+        "--data_path", type=str, default="../data/detection"   
     )
     args = parser.parse_args()
     split_dataset(args.data_path)
 
-# python split_dataset.py --data_path ../data/traffic_light
+# python split_dataset.py --data_path ../data/detection
