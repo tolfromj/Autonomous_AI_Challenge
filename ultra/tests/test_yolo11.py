@@ -8,7 +8,7 @@ def get_file_extension(filename):
 
 if __name__ == "__main__":
     output_path = "../../output"
-    test_db_path = "../../data/test"
+    test_db_path = "../../data/detection/test"
     test_res_path = "%s/predictions"%(output_path)
 
     if not os.path.exists(test_res_path):
@@ -24,14 +24,14 @@ if __name__ == "__main__":
     model_filename = "runs/detect/traffic_yolov11_s_sgd/weights/best.pt" # 절대경로로 변경할 것.
     model = YOLO(model_filename)
 
-    # img_filename -> ../../data/test/images/00001234.jpg
+    # img_filename -> ../../data/detection/test/images/00001234.jpg
     for img_filename in img_files:
         result = model.predict(img_filename, imgsz=1280, conf=0.001, iou=0.6)[0]
         # result = model.predict(img_filename)[0]
         
         img_ext = get_file_extension(img_filename)
-        txt_filename = img_filename.replace(img_ext, "txt")                          # ../../data/test/images/00001234.txt
-        txt_filename = txt_filename.replace("data/test/images","output/predictions") # ../../data/test/predictions/00001234.txt
+        txt_filename = img_filename.replace(img_ext, "txt")                          # ../../data/detection/test/images/00001234.txt
+        txt_filename = txt_filename.replace("data/detection/test/images","output/predictions") # ../../data/detection/test/predictions/00001234.txt
         boxes = result.boxes                                                      # => ../../output/predictions
         num_obj = len(boxes.cls)
 
