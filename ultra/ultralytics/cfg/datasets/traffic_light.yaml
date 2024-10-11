@@ -13,7 +13,7 @@
 #     |   └── val  
 #     |   └── test
 #     |
-#     └── segmantation   <- 객체복합상태인식
+#     └── segmentation   <- 객체복합상태인식
 #         └── train 
 #         └── val  
 #         └── test

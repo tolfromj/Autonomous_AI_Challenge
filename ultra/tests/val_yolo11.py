@@ -3,7 +3,7 @@ import os
 os.environ["NCCL_P2P_DISABLE"] = "1" 
 
 
-model_filename = "runs/detect/traffic_yolov11_s_sgd/weights/best.pt" # 절대경로로 변경할 것.
+model_filename = "/workspace/traffic_light/ultra/output/runs/detect/traffic_yolov11_s_sgd/weights/best.pt" # 절대경로로 변경할 것.
 
 model = YOLO(model_filename)
 

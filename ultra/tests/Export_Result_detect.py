@@ -1,15 +1,16 @@
 from ultralytics import YOLO
 import os 
 import glob
+import argparse
 
 def get_file_extension(filename):
     _, extension = os.path.splitext(filename)
     return extension.lstrip('.')
 
-if __name__ == "__main__":
-    output_path = "../../output"
+def main(model_filename):
+    result_path = "../Result/detect"
     test_db_path = "../../data/detection/test"
-    test_res_path = "%s/predictions"%(output_path)
+    test_res_path = "%s/predictions"%(result_path)
 
     if not os.path.exists(test_res_path):
         os.makedirs(test_res_path)
@@ -21,7 +22,6 @@ if __name__ == "__main__":
                                 
     img_files.sort() 
 
-    model_filename = "runs/detect/traffic_yolov11_s_sgd/weights/best.pt" # 절대경로로 변경할 것.
     model = YOLO(model_filename)
 
     # img_filename -> ../../data/detection/test/images/00001234.jpg
@@ -31,8 +31,8 @@ if __name__ == "__main__":
         
         img_ext = get_file_extension(img_filename)
         txt_filename = img_filename.replace(img_ext, "txt")                          # ../../data/detection/test/images/00001234.txt
-        txt_filename = txt_filename.replace("data/detection/test/images","output/predictions") # ../../data/detection/test/predictions/00001234.txt
-        boxes = result.boxes                                                      # => ../../output/predictions
+        txt_filename = txt_filename.replace("../data/detection/test/images","Result/detect/predictions") # ../../data/detection/test/predictions/00001234.txt
+        boxes = result.boxes                                                      # => ../Result/detect/predictions
         num_obj = len(boxes.cls)
 
         with open(txt_filename, 'w') as f1:
@@ -49,3 +49,10 @@ if __name__ == "__main__":
 
         if num_obj == 0:
             print(txt_filename)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model_ckpt", type=str, default="../output/runs/detect/traffic_yolov11_s_sgd/weights/best.pt"   
+    )
+    args = parser.parse_args()
+    main(args.model_ckpt) # 절대경로로 변경할 것.
