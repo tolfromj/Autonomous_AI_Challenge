@@ -1,5 +1,6 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 
+import contextlib
 import json
 from collections import defaultdict
 from itertools import repeat
@@ -14,7 +15,6 @@ from torch.utils.data import ConcatDataset
 
 from ultralytics.utils import LOCAL_RANK, NUM_THREADS, TQDM, colorstr
 from ultralytics.utils.ops import resample_segments
-from ultralytics.utils.torch_utils import TORCHVISION_0_18
 
 from .augment import (
     Compose,
@@ -73,6 +73,10 @@ class YOLODataset(BaseDataset):
         Returns:
             (dict): labels.
         """
+        if "actions" in self.data:
+            action_len = len(self.data["actions"])
+        else: action_len = False
+        
         x = {"labels": []}
         nm, nf, ne, nc, msgs = 0, 0, 0, 0, []  # number missing, found, empty, corrupt, messages
         desc = f"{self.prefix}Scanning {path.parent / path.stem}..."
@@ -84,37 +88,70 @@ class YOLODataset(BaseDataset):
                 "keypoints, number of dims (2 for x,y or 3 for x,y,visible)], i.e. 'kpt_shape: [17, 3]'"
             )
         with ThreadPool(NUM_THREADS) as pool:
-            results = pool.imap(
-                func=verify_image_label,
-                iterable=zip(
-                    self.im_files,
-                    self.label_files,
-                    repeat(self.prefix),
-                    repeat(self.use_keypoints),
-                    repeat(len(self.data["names"])),
-                    repeat(nkpt),
-                    repeat(ndim),
-                ),
-            )
+            try:
+                results = pool.imap(
+                    func=verify_image_label,
+                    iterable=zip(
+                        self.im_files,
+                        self.label_files,
+                        repeat(self.prefix),
+                        repeat(self.use_keypoints),
+                        repeat(len(self.data["names"])),
+                        repeat(len(self.data["locs"])),
+                        repeat(len(self.data["actions"])),
+                        repeat(nkpt),
+                        repeat(ndim),
+                    ),
+                )
+            except KeyError:
+                results = pool.imap(
+                    func=verify_image_label,
+                    iterable=zip(
+                        self.im_files,
+                        self.label_files,
+                        repeat(self.prefix),
+                        repeat(self.use_keypoints),
+                        repeat(len(self.data["names"])),
+                        repeat(nkpt),
+                        repeat(ndim),
+                    ),
+                )
             pbar = TQDM(results, desc=desc, total=total)
             for im_file, lb, shape, segments, keypoint, nm_f, nf_f, ne_f, nc_f, msg in pbar:
+                
                 nm += nm_f
                 nf += nf_f
                 ne += ne_f
                 nc += nc_f
                 if im_file:
-                    x["labels"].append(
-                        {
-                            "im_file": im_file,
-                            "shape": shape,
-                            "cls": lb[:, 0:1],  # n, 1
-                            "bboxes": lb[:, 1:],  # n, 4
-                            "segments": segments,
-                            "keypoints": keypoint,
-                            "normalized": True,
-                            "bbox_format": "xywh",
-                        }
-                    )
+                    if action_len:
+                        x["labels"].append(
+                            {
+                                "im_file": im_file,
+                                "shape": shape,
+                                "cls": lb[:, 0:1],  # n, 1
+                                "loc": lb[:, 1:2],  # n, 1
+                                "action": lb[:, 2:2+action_len],  # n, 1
+                                "bboxes": lb[:, 2+action_len:],  # n, 4
+                                "segments": segments,
+                                "keypoints": keypoint,
+                                "normalized": True,
+                                "bbox_format": "xywh",
+                            }
+                        )
+                    else:
+                        x["labels"].append(
+                            {
+                                "im_file": im_file,
+                                "shape": shape,
+                                "cls": lb[:, 0:1],  # n, 1
+                                "bboxes": lb[:, 1:],  # n, 4
+                                "segments": segments,
+                                "keypoints": keypoint,
+                                "normalized": True,
+                                "bbox_format": "xywh",
+                            }
+                        )
                 if msg:
                     msgs.append(msg)
                 pbar.desc = f"{desc} {nf} images, {nm + ne} backgrounds, {nc} corrupt"
@@ -138,6 +175,8 @@ class YOLODataset(BaseDataset):
             cache, exists = load_dataset_cache_file(cache_path), True  # attempt to load a *.cache file
             assert cache["version"] == DATASET_CACHE_VERSION  # matches current version
             assert cache["hash"] == get_hash(self.label_files + self.im_files)  # identical hash
+            if not cache:
+                raise ValueError("Cache is empty")
         except (FileNotFoundError, AssertionError, AttributeError):
             cache, exists = self.cache_labels(cache_path), False  # run cache ops
 
@@ -236,7 +275,11 @@ class YOLODataset(BaseDataset):
             value = values[i]
             if k == "img":
                 value = torch.stack(value, 0)
-            if k in {"masks", "keypoints", "bboxes", "cls", "segments", "obb"}:
+            if k in {"masks", "keypoints", "bboxes", "cls","loc","action", "segments", "obb"}:
+                #print(k, value)
+                if isinstance(value[0], np.ndarray): # 'loc', 'action' are ndarray
+                    value = tuple(torch.from_numpy(np.array(v)) for v in value)
+                    
                 value = torch.cat(value, 0)
             new_batch[k] = value
         new_batch["batch_idx"] = list(new_batch["batch_idx"])
@@ -263,7 +306,7 @@ class YOLOMultiModalDataset(YOLODataset):
         super().__init__(*args, data=data, task=task, **kwargs)
 
     def update_labels_info(self, label):
-        """Add texts information for multi-modal model training."""
+        """Add texts information for multi modal model training."""
         labels = super().update_labels_info(label)
         # NOTE: some categories are concatenated with its synonyms by `/`.
         labels["texts"] = [v.split("/") for _, v in self.data["names"].items()]
@@ -279,8 +322,6 @@ class YOLOMultiModalDataset(YOLODataset):
 
 
 class GroundingDataset(YOLODataset):
-    """Handles object detection tasks by loading annotations from a specified JSON file, supporting YOLO format."""
-
     def __init__(self, *args, task="detect", json_file, **kwargs):
         """Initializes a GroundingDataset for object detection, loading annotations from a specified JSON file."""
         assert task == "detect", "`GroundingDataset` only support `detect` task for now!"
@@ -295,13 +336,13 @@ class GroundingDataset(YOLODataset):
         """Loads annotations from a JSON file, filters, and normalizes bounding boxes for each image."""
         labels = []
         LOGGER.info("Loading annotation file...")
-        with open(self.json_file) as f:
+        with open(self.json_file, "r") as f:
             annotations = json.load(f)
         images = {f'{x["id"]:d}': x for x in annotations["images"]}
-        img_to_anns = defaultdict(list)
+        imgToAnns = defaultdict(list)
         for ann in annotations["annotations"]:
-            img_to_anns[ann["image_id"]].append(ann)
-        for img_id, anns in TQDM(img_to_anns.items(), desc=f"Reading annotations {self.json_file}"):
+            imgToAnns[ann["image_id"]].append(ann)
+        for img_id, anns in TQDM(imgToAnns.items(), desc=f"Reading annotations {self.json_file}"):
             img = images[f"{img_id:d}"]
             h, w, f = img["height"], img["width"], img["file_name"]
             im_file = Path(self.img_path) / f
@@ -418,10 +459,7 @@ class ClassificationDataset:
         import torchvision  # scope for faster 'import ultralytics'
 
         # Base class assigned as attribute rather than used as base class to allow for scoping slow torchvision import
-        if TORCHVISION_0_18:  # 'allow_empty' argument first introduced in torchvision 0.18
-            self.base = torchvision.datasets.ImageFolder(root=root, allow_empty=True)
-        else:
-            self.base = torchvision.datasets.ImageFolder(root=root)
+        self.base = torchvision.datasets.ImageFolder(root=root)
         self.samples = self.base.samples
         self.root = self.base.root
 
@@ -430,12 +468,6 @@ class ClassificationDataset:
             self.samples = self.samples[: round(len(self.samples) * args.fraction)]
         self.prefix = colorstr(f"{prefix}: ") if prefix else ""
         self.cache_ram = args.cache is True or str(args.cache).lower() == "ram"  # cache images into RAM
-        if self.cache_ram:
-            LOGGER.warning(
-                "WARNING ⚠️ Classification `cache_ram` training has known memory leak in "
-                "https://github.com/ultralytics/ultralytics/issues/9824, setting `cache_ram=False`."
-            )
-            self.cache_ram = False
         self.cache_disk = str(args.cache).lower() == "disk"  # cache images on hard drive as uncompressed *.npy files
         self.samples = self.verify_images()  # filter out bad images
         self.samples = [list(x) + [Path(x[0]).with_suffix(".npy"), None] for x in self.samples]  # file, index, npy, im
@@ -482,7 +514,7 @@ class ClassificationDataset:
         desc = f"{self.prefix}Scanning {self.root}..."
         path = Path(self.root).with_suffix(".cache")  # *.cache file path
 
-        try:
+        with contextlib.suppress(FileNotFoundError, AssertionError, AttributeError):
             cache = load_dataset_cache_file(path)  # attempt to load a *.cache file
             assert cache["version"] == DATASET_CACHE_VERSION  # matches current version
             assert cache["hash"] == get_hash([x[0] for x in self.samples])  # identical hash
@@ -494,25 +526,24 @@ class ClassificationDataset:
                     LOGGER.info("\n".join(cache["msgs"]))  # display warnings
             return samples
 
-        except (FileNotFoundError, AssertionError, AttributeError):
-            # Run scan if *.cache retrieval failed
-            nf, nc, msgs, samples, x = 0, 0, [], [], {}
-            with ThreadPool(NUM_THREADS) as pool:
-                results = pool.imap(func=verify_image, iterable=zip(self.samples, repeat(self.prefix)))
-                pbar = TQDM(results, desc=desc, total=len(self.samples))
-                for sample, nf_f, nc_f, msg in pbar:
-                    if nf_f:
-                        samples.append(sample)
-                    if msg:
-                        msgs.append(msg)
-                    nf += nf_f
-                    nc += nc_f
-                    pbar.desc = f"{desc} {nf} images, {nc} corrupt"
-                pbar.close()
-            if msgs:
-                LOGGER.info("\n".join(msgs))
-            x["hash"] = get_hash([x[0] for x in self.samples])
-            x["results"] = nf, nc, len(samples), samples
-            x["msgs"] = msgs  # warnings
-            save_dataset_cache_file(self.prefix, path, x, DATASET_CACHE_VERSION)
-            return samples
+        # Run scan if *.cache retrieval failed
+        nf, nc, msgs, samples, x = 0, 0, [], [], {}
+        with ThreadPool(NUM_THREADS) as pool:
+            results = pool.imap(func=verify_image, iterable=zip(self.samples, repeat(self.prefix)))
+            pbar = TQDM(results, desc=desc, total=len(self.samples))
+            for sample, nf_f, nc_f, msg in pbar:
+                if nf_f:
+                    samples.append(sample)
+                if msg:
+                    msgs.append(msg)
+                nf += nf_f
+                nc += nc_f
+                pbar.desc = f"{desc} {nf} images, {nc} corrupt"
+            pbar.close()
+        if msgs:
+            LOGGER.info("\n".join(msgs))
+        x["hash"] = get_hash([x[0] for x in self.samples])
+        x["results"] = nf, nc, len(samples), samples
+        x["msgs"] = msgs  # warnings
+        save_dataset_cache_file(self.prefix, path, x, DATASET_CACHE_VERSION)
+        return samples
