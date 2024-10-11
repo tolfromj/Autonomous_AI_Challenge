@@ -103,7 +103,7 @@ class YOLODataset(BaseDataset):
                         repeat(ndim),
                     ),
                 )
-            except KeyError:
+            except KeyError :
                 results = pool.imap(
                     func=verify_image_label,
                     iterable=zip(

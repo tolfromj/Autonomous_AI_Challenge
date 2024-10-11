@@ -242,13 +242,5 @@ if __name__ == '__main__':
     avg_iou = sum(iou_scores) / len(iou_scores)
     print(f"Average IoU between img vs polygon: {avg_iou}")
 
-# iou_scores = []
-# # Example usage
-# original_data_dir ='' #Target_Data './Compete_Dataset_Refined/'
-# new_data_dir ='' #New Dir './Compete_COCO/'
-# create_new_data_directory(original_data_dir, new_data_dir, split_ratio=0.8)
-
-# avg_iou = sum(iou_scores) / len(iou_scores)
-# print(f"Average IoU between img vs polygon: {avg_iou}")
 
 

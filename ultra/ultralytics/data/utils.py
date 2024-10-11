@@ -97,7 +97,11 @@ def verify_image(args):
 
 def verify_image_label(args):
     """Verify one image-label pair."""
-    im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim = args
+    try:
+        im_file, lb_file, prefix, keypoint, num_cls,num_loc,num_actions, nkpt, ndim = args
+    except ValueError:
+        im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim = args
+        num_actions = False
     # Number (missing, found, empty, corrupt), message, segments, keypoints
     nm, nf, ne, nc, msg, segments, keypoints = 0, 0, 0, 0, "", [], None
     try:
@@ -120,10 +124,19 @@ def verify_image_label(args):
             nf = 1  # label found
             with open(lb_file) as f:
                 lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
-                if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
-                    classes = np.array([x[0] for x in lb], dtype=np.float32)
-                    segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
-                    lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
+                if num_actions:
+                    if any(len(x) > 6+1+num_actions for x in lb) and (not keypoint):  # is segment
+                        classes = np.array([x[0] for x in lb], dtype=np.float32)
+                        classes = np.array([x[0] for x in lb], dtype=np.float32)
+                        locations = np.array([x[1] for x in lb], dtype=np.float32)
+                        actions = np.array([x[2:2+num_actions] for x in lb], dtype=np.float32)
+                        segments = [np.array(x[2+num_actions:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
+                        lb = np.concatenate((classes.reshape(-1, 1),locations.reshape(-1, 1),actions.reshape(-1, num_actions), segments2boxes(segments)), 1)  # (cls, xywh)
+                else:
+                    if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
+                        classes = np.array([x[0] for x in lb], dtype=np.float32)
+                        segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
+                        lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
                 lb = np.array(lb, dtype=np.float32)
             nl = len(lb)
             if nl:
@@ -131,8 +144,12 @@ def verify_image_label(args):
                     assert lb.shape[1] == (5 + nkpt * ndim), f"labels require {(5 + nkpt * ndim)} columns each"
                     points = lb[:, 5:].reshape(-1, ndim)[:, :2]
                 else:
-                    assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
-                    points = lb[:, 1:]
+                    if num_actions:
+                        assert lb.shape[1] == 5+1+num_actions, f"labels require 5 columns, {lb.shape[1]} columns detected"
+                        points = lb[:, 1+1+num_actions:]
+                    else:
+                        assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
+                        points = lb[:, 1:]
                 assert points.max() <= 1, f"non-normalized or out of bounds coordinates {points[points > 1]}"
                 assert lb.min() >= 0, f"negative label values {lb[lb < 0]}"
 
@@ -159,9 +176,15 @@ def verify_image_label(args):
             if ndim == 2:
                 kpt_mask = np.where((keypoints[..., 0] < 0) | (keypoints[..., 1] < 0), 0.0, 1.0).astype(np.float32)
                 keypoints = np.concatenate([keypoints, kpt_mask[..., None]], axis=-1)  # (nl, nkpt, 3)
-        lb = lb[:, :5]
+        if num_actions:
+            lb = lb[:, :5+1+num_actions]
+            if nm+ne>0:
+                print(im_file)
+        else:
+            lb = lb[:, :5]
         return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
     except Exception as e:
+        print(e)
         nc = 1
         msg = f"{prefix}WARNING ⚠️ {im_file}: ignoring corrupt image/label: {e}"
         return [None, None, None, None, None, nm, nf, ne, nc, msg]
@@ -217,7 +240,7 @@ def polygons2masks_overlap(imgsz, segments, downsample_ratio=1):
     ms = []
     for si in range(len(segments)):
         mask = polygon2mask(imgsz, [segments[si].reshape(-1)], downsample_ratio=downsample_ratio, color=1)
-        ms.append(mask.astype(masks.dtype))
+        ms.append(mask)
         areas.append(mask.sum())
     areas = np.asarray(areas)
     index = np.argsort(-areas)
@@ -295,8 +318,16 @@ def check_det_dataset(dataset, autodownload=True):
         data["names"] = [f"class_{i}" for i in range(data["nc"])]
     else:
         data["nc"] = len(data["names"])
+        if "locs" in data:
+            data["nloc"] = len(data["locs"])
+        if "actions" in data:
+            data["naction"] = len(data["actions"])
 
     data["names"] = check_class_names(data["names"])
+    if "locs" in data:
+        data["locs"] = check_class_names(data["locs"])
+    if "actions" in data:
+        data["actions"] = check_class_names(data["actions"])
 
     # Resolve paths
     path = Path(extract_dir or data.get("path") or Path(data.get("yaml_file", "")).parent)  # dataset root
@@ -453,12 +484,12 @@ class HUBDatasetStats:
         path = Path(path).resolve()
         LOGGER.info(f"Starting HUB dataset checks for {path}....")
 
-        self.task = task  # detect, segment, pose, classify, obb
+        self.task = task  # detect, segment, pose, classify
         if self.task == "classify":
             unzip_dir = unzip_file(path)
             data = check_cls_dataset(unzip_dir)
             data["path"] = unzip_dir
-        else:  # detect, segment, pose, obb
+        else:  # detect, segment, pose
             _, data_dir, yaml_path = self._unzip(Path(path))
             try:
                 # Load YAML with checks
