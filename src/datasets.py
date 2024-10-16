@@ -2,9 +2,12 @@ import torch
 import numpy as np
 from torch import nn
 from tqdm import tqdm
+import random
 
 # dataset
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset#, DataLoader
+#from utils.collate_fn import detr_collate_fn
+
 # from glob import glob
 import os
 from PIL import Image, ImageDraw
@@ -12,50 +15,31 @@ from pycocotools.coco import COCO
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-root_folder = "/workspace/data/traffic_light/train/"
+# root_dir = "/workspace/traffic_light/data/detection/train/"
 
 import os
 from transformers import AutoImageProcessor
 
-
-TRAIN_AUGMENTS_FOR_ULTRALYTICS = A.Compose([
-            # 스케일을 무작위로 변경하는 증강
-    A.RandomScale(scale_limit=0.2, p=1.0),
-    A.RandomBrightnessContrast(p=1.0),
-    # 이미지를 512x512 크기로 리사이징
-    A.Resize(height=480, width=480, p=1.0),
-    # PyTorch 모델에 입력하기 위한 변환
-    ToTensorV2(p=1.0),
-    A.Normalize(mean=[0.0, 0.0, 0.0], std=[1.0, 1.0, 1.0], max_pixel_value=255.0, p=1.0)
-], bbox_params=A.BboxParams(format='coco', label_fields=['labels']))
-
-TRAIN_AUGMENTS_FOR_HUGGINGFACE = A.Compose([
-            # 스케일을 무작위로 변경하는 증강
-    A.RandomScale(scale_limit=0.2, p=1.0),
-    A.RandomBrightnessContrast(p=1.0),
-    # 이미지를 512x512 크기로 리사이징
-    A.Resize(height=480, width=480, p=1.0),
-    # PyTorch 모델에 입력하기 위한 변환
-    ToTensorV2(p=1.0),
-    A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], max_pixel_value=255.0, p=1.0)
-], bbox_params=A.BboxParams(format='coco', label_fields=['labels']))
-
-TEST_AUGMENTS = A.Compose([
-    A.Resize(height=480, width=480, p=1.0),
-    ToTensorV2(p=1.0)
-], bbox_params=A.BboxParams(format='coco', label_fields=['labels']))
+random.seed(42)
 
 
 class TrafficLightDataset(Dataset):
-    def __init__(self, augments):
-        self.img_paths = os.path.join(root_folder, 'images') # img_paths : path
-        self.coco = COCO(os.path.join(root_folder, 'annotations.json')) # json
-        
+    """
+    self.img_keys : The index and image_id are different, 
+        so a mapping function is needed to map the index to the image_id.
+    """
+    def __init__(self, root_dir, transform=None):
+        self.img_paths = os.path.join(root_dir, 'images') # img_paths : path
+        self.coco = COCO(os.path.join(root_dir, 'train.json')) # json
+        self.img_keys = sorted(self.coco.imgs.keys())
+        self.transform = transform
+        self.checkpoint = "facebook/detr-resnet-50"
+        self.image_processor = AutoImageProcessor.from_pretrained(self.checkpoint)
 
-        self.augments = augments
-
-
-
+    def __call__(self, transform):
+        self.transform = transform
+        return self
+    
     def __len__(self):
         return len(self.coco.imgs.keys())
 
@@ -70,22 +54,22 @@ class TrafficLightDataset(Dataset):
         
         for anno_id in self.coco.getAnnIds(id):
             anns = self.coco.loadAnns(anno_id)[0]
-            labels.append(anns['category_id'])
-            if self.data_format == 'pascal_voc':
-                bboxes.append(self._coco_to_pascal_bbox(anns['bbox']))
-            else: bboxes.append(anns['bbox'])
+            labels.append(anns['category_id'])    
+            bboxes.append(anns['bbox'])
             area.append(anns['area'])
         return bboxes, labels, area
 
-    def formatted_anns(self, id, labels, area, bboxes):
+    def formatted_anns(self, id, labels, area, bboxes, orig_w, orig_h):
         annotations = []
         for i in range(0, len(labels)):
+            bbox = [round(value, 3) for value in bboxes[i]]
             new_ann = {
                 "image_id": id,
                 "category_id": labels[i],
                 "isCrowd": 0,
                 "area": area,
-                "bbox": bboxes[i],
+                "bbox": bbox,
+                "orig_size": [orig_w, orig_h]
             }
             annotations.append(new_ann)
     
@@ -129,32 +113,42 @@ class TrafficLightDataset(Dataset):
                 "iscrowd": torch.int64
                 "orig_size": torch.int64 -> [W, H]
 
+        
 
         """
-        img_size_width = self.coco.loadImgs(index)[0]['width']
-        img_size_height = self.coco.loadImgs(index)[0]['height']
+        index = self.img_keys[index]
+        orig_width = self.coco.loadImgs(index)[0]['width']
+        orig_height = self.coco.loadImgs(index)[0]['height']
         image = self._load_image(index) # type of image is np.array
         bboxes, labels, area = self._load_bbox(index) # type of these are python
-        
-        if self.aug:
-            image, bboxes = self._augmetation(image, bboxes, labels)
-        
-        annotations = {"image_id": index, "annotations": self.formatted_anns(index, labels, area, bboxes)}
-        # encoding = self.image_processor(images=image, annotations=annotations, return_tensors="pt")
 
-        # pixel_values = encoding["pixel_values"].squeeze()
-        # target = encoding["labels"][0]
-        # 1500, 1200, 30, 500
-        target = {}
-        target['boxes'] = torch.as_tensor(bboxes, dtype=torch.float32)
-        target['labels'] = torch.as_tensor(labels, dtype=torch.int64)
-        target['area'] = torch.as_tensor(area, dtype=torch.float32)
-        target['iscrowd'] = torch.zeros(len(bboxes), dtype=torch.int64)
-        # TODO: 
-        target["image_id"] = torch.tensor([index], dtype=torch.int64)
-        target["orig_size"] = torch.tensor([img_size_width, img_size_height], dtype=torch.int64)
+        if self.transform != None:
+            transformed = self.transform(image=image, bboxes=bboxes, labels=labels)
+            image, bboxes = transformed['image'], transformed['bboxes']
+        
+        annotations = {"image_id": index, "annotations": self.formatted_anns(index, labels, area, bboxes, orig_width, orig_height)}
+        encoding = self.image_processor(images=image, annotations=annotations, return_tensors="pt")
+
+        
+        image = encoding["pixel_values"].squeeze()
+        mask = encoding["pixel_mask"].squeeze()
+        labels = encoding["labels"][0] # remove batch dimension
+
+        target = {'pixel_mask': mask, 'labels': labels}
+
+        # target = {}
+        # target['boxes'] = torch.as_tensor(bboxes, dtype=torch.float32)
+        # target['labels'] = torch.as_tensor(labels, dtype=torch.int64)
+        # target['area'] = torch.as_tensor(area, dtype=torch.float32)
+        # target['iscrowd'] = torch.zeros(len(bboxes), dtype=torch.int64)
+        # # TODO: 
+        # target["image_id"] = torch.tensor([index], dtype=torch.int64)
+        # target["orig_size"] = torch.tensor([img_size_width, img_size_height], dtype=torch.int64)
             
         return image, target
     
 
-data_loader = DataLoader(TrafficLightDataset(TRAIN_AUGMENTS_FOR_ULTRALYTICS), batch_size=2, shuffle=True, collate_fn=lambda x: tuple(zip(*x)))
+# data_loader = DataLoader(TrafficLightDataset(TRAIN_AUGMENTS_FOR_HUGGINGFACE), batch_size=2, shuffle=True, collate_fn=collate_fn)#lambda x: tuple(zip(*x)))
+# data_loader = DataLoader(TrafficLightDataset("", ), batch_size=4, shuffle=True, collate_fn=detr_collate_fn)#lambda x: tuple(zip(*x)))
+
+# print(next(iter(data_loader)))
