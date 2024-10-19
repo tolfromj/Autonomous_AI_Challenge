@@ -1,16 +1,17 @@
 import os
+import argparse
 import multiprocessing
 from tqdm import tqdm
 
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 import numpy as np
 import albumentations as A
 
 from models import get_model
 from datasets import TrafficLightDataset
 from utils.collate_fn import get_collate
-from torch.utils.data import DataLoader
 
 
 # def train() -> None:
@@ -23,21 +24,12 @@ def train(
 
     # for name, layer in model.namesd_modules():
     #     print(name, layer)
-    for param in model.parameters():
-        param.requires_grad = False
-
-    for param in model.class_labels_classifier.parameters():
-        param.requires_grad = True
-
-    for param in model.bbox_predictor.parameters():
-        param.requires_grad = True
 
     model.train()
 
     train_loss = 0
 
-    for batch_idx, (images, targets) in tqdm(enumerate((dataloader))):
-
+    for batch_idx, (images, targets) in enumerate(tqdm((dataloader))):
         images = images.to(device)
         if type(targets) is dict:  # detr에 경우.
             targets["pixel_mask"] = targets["pixel_mask"].to(device)
@@ -53,29 +45,28 @@ def train(
         loss = outputs["loss"]
         loss.backward()
         model.optimizer.step()
-        val_loss = loss.item()
-        log_term = 100  # len(dataloader) // 5
-        if (batch_idx + 1) % log_term == 0:
-            train_loss = val_loss / log_term
+        train_loss = loss.item()
+        # log_term = 100  # len(dataloader) // 5
+        # if (batch_idx + 1) % log_term == 0:
+        # train_loss = val_loss / log_term
 
-            print(
-                f"Epoch[{epoch}]({batch_idx + 1}/{len(dataloader)}) "
-                f"| lr {model.learning_rate} \ntrain loss {train_loss:4.4}"
-            )
+    print(
+        f"Epoch[{epoch}]({batch_idx + 1}/{len(dataloader)}) "
+        f"| lr {model.learning_rate} \n train loss {train_loss:4.4}"
+    )
 
-        
-        # lr_decay check
-        # if epoch == 9:
-        #     lr_decay = 0.1
-        #     model.scale_lr(lr_decay)
-        #     model.learning_rate  = model.learning_rate * lr_decay
+    # lr_decay check
+    # if epoch == 9:
+    #     lr_decay = 0.1
+    #     model.scale_lr(lr_decay)
+    #     model.learning_rate  = model.learning_rate * lr_decay
 
-        # grad check
-        # for name, param in model.named_parameters():
-        #     if param.grad is not None:
-        #         print(f"After zero_grad, {name} grad: {param.grad}")
+    # grad check
+    # for name, param in model.named_parameters():
+    #     if param.grad is not None:
+    #         print(f"After zero_grad, {name} grad: {param.grad}")
 
-        # print(f"epoch_{batch_idx}: loss: {return_dict["loss"]}")
+    # print(f"epoch_{batch_idx}: loss: {return_dict["loss"]}")
 
 
 def validation(
@@ -88,8 +79,9 @@ def validation(
     model.eval()
     valid_loss = []
 
+    print("start validataion ...")
     with torch.no_grad():
-        for batch_idx, (images, targets) in enumerate(dataloader):
+        for batch_idx, (images, targets) in enumerate(tqdm(dataloader)):
 
             # setting device
             images = images.to(device)
@@ -107,8 +99,6 @@ def validation(
 
     print(f"Epoch[{epoch}]({len(dataloader)})" f"valid loss {val_loss:4.4}")
 
-    torch.save(model.state_dict(), f"{save_dir}/{epoch}-{val_loss:4.4}.pth")
-    print(f"Saved Model to {save_dir}/{epoch}-{val_loss:4.4}.pth")
     return val_loss
 
 
@@ -121,31 +111,39 @@ def run_pytorch(
     :param configs: 학습에 사용할 config
     :type configs: dict
     """
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    model = get_model(model_name, device).to(
+        device
+    )  # model_name : "facebook/detr-resnet-50"
 
-    dataset = TrafficLightDataset(
-        root_dir,  # root_dir; "/workspace/traffic_light/data/detection/train/"
+    train_dataset = TrafficLightDataset(
+        root_dir,
+        mode="train",
+        image_processor=model_name,  # root_dir; "/workspace/traffic_light/data/detection/"
     )
-    collate_fn = get_collate(model_name)
+    val_dataset = TrafficLightDataset(root_dir, mode="val", image_processor=model_name)
+    collate_fn = get_collate(model_name, device)
     train_augments_for_huggingface = A.Compose(
         [
-            A.RandomScale(scale_limit=0.2, p=1.0),
-            A.RandomBrightnessContrast(p=1.0),
-            A.Resize(height=32, width=32, p=1.0),
+            # A.RandomScale(scale_limit=0.2, p=1.0),
+            A.HorizontalFlip(p=0.3),
+            A.RandomBrightnessContrast(p=0.3),
+            A.Resize(height=800, width=800, p=1.0),
         ],
-        bbox_params=A.BboxParams(format="pascal_voc", label_fields=["labels"]),
+        bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
     )
 
     val_augments_for_huggingface = A.Compose(
         [
-            A.RandomScale(scale_limit=0.2, p=1.0),
-            A.RandomBrightnessContrast(p=1.0),
-            A.Resize(height=32, width=32, p=1.0),
+            # A.RandomScale(scale_limit=0.2, p=1.0),
+            # A.RandomBrightnessContrast(p=1.0),
+            A.Resize(height=800, width=800, p=1.0),
         ],
-        bbox_params=A.BboxParams(format="pascal_voc", label_fields=["labels"]),
+        bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
     )
 
     train_loader = DataLoader(
-        dataset(train_augments_for_huggingface),
+        train_dataset(train_augments_for_huggingface),
         batch_size=batch_size,
         num_workers=multiprocessing.cpu_count() // 2,
         shuffle=True,
@@ -153,15 +151,20 @@ def run_pytorch(
     )
 
     val_loader = DataLoader(
-        dataset(val_augments_for_huggingface),
+        val_dataset(val_augments_for_huggingface),
         batch_size=batch_size,
         num_workers=multiprocessing.cpu_count() // 2,
         shuffle=False,
         collate_fn=collate_fn,
     )
 
-    device = "cuda:1" if torch.cuda.is_available() else "cpu"
-    model = get_model(model_name).to(device)  # model_name : "facebook/detr-resnet-50"
+    # pre-trained model freezing
+    for param in model.parameters():
+        param.requires_grad = False
+    for param in model.class_labels_classifier.parameters():
+        param.requires_grad = True
+    for param in model.bbox_predictor.parameters():
+        param.requires_grad = True
 
     save_dir = os.path.join(ckpt_path, str(model_name))
     if not os.path.exists(save_dir):
@@ -191,8 +194,19 @@ def run_pytorch(
         val_loss = validation(val_loader, save_dir, model, device, e + 1)
         if val_loss < best_loss:
             best_loss = val_loss
+            torch.save(
+                {
+                    "epoch": e,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": model.optimizer.state_dict(),
+                    "loss": val_loss,
+                },
+                f"{save_dir}/best.pth",
+            )
+            print(
+                f"Saved best_loss Model to {save_dir}/best.pth ({e}/{epoch}-{val_loss:4.4})"
+            )
             cnt = 0
-            model.save("")
         else:
             cnt += 1
         if cnt == early_patience:
@@ -203,13 +217,27 @@ def run_pytorch(
 
 
 if __name__ == "__main__":
-    root_dir = "/workspace/traffic_light/data/detection/train/"
-    model_name = "facebook/detr-resnet-50"
-    ckpt_path = "/workspace/traffic_light/output"
-    batch_size = 8
-    epoch = 1
-    early_patience = 5
-    run_pytorch(root_dir, model_name, ckpt_path, batch_size, epoch, early_patience)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-101")
+    parser.add_argument(
+        "--root_dir", type=str, default="/workspace/traffic_light/data/detection/"
+    )
+    parser.add_argument(
+        "--ckpt_path", type=str, default="/workspace/traffic_light/output"
+    )
+    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--epoch", type=int, default=1)
+    parser.add_argument("--early_patience", type=int, default=5)
+    args = parser.parse_args()
+
+    run_pytorch(
+        args.root_dir,
+        args.model_name,
+        args.ckpt_path,
+        args.batch_size,
+        args.epoch,
+        args.early_patience,
+    )
     # val_augments_for_huggingface = A.Compose([
     #     A.RandomScale(scale_limit=0.2, p=1.0),
     #     A.RandomBrightnessContrast(p=1.0),

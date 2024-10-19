@@ -12,11 +12,13 @@ from transformers import AutoImageProcessor
 
 from models import get_model
 
+
 def get_file_extension(filename):
     _, extension = os.path.splitext(filename)
     return extension.lstrip(".")
 
-def main(model_name, ckpt_path, result_dir, img_dir, threshold = 0.5):
+
+def main(model_name, ckpt_path, result_dir, img_dir, threshold=0.5):
 
     model = get_model(model_name, "cpu").to("cpu")
     model.load_state_dict(torch.load(ckpt_path)["model_state_dict"])
@@ -39,7 +41,7 @@ def main(model_name, ckpt_path, result_dir, img_dir, threshold = 0.5):
             A.Resize(height=800, width=800, p=1.0),
         ]
     )
-    
+
     # make result files
     with torch.no_grad():
         for img_file in tqdm(img_files):
@@ -48,7 +50,7 @@ def main(model_name, ckpt_path, result_dir, img_dir, threshold = 0.5):
             txt_filename = img_file.replace(img_ext, "txt")
             txt_file = os.path.join(result_dir, txt_filename)
 
-            # load a image 
+            # load a image
             img_path = os.path.join(img_dir, img_file)
             image = Image.open(img_path)
             width, height = image.size
@@ -89,19 +91,22 @@ def main(model_name, ckpt_path, result_dir, img_dir, threshold = 0.5):
             if num_obj == 0:
                 print(f"'{img_file}' has no boxes")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-101")
     parser.add_argument(
-        "--model_name", type=str, default="facebook/detr-resnet-101"
-    )
-    parser.add_argument(
-        "--ckpt_path", type=str, default="/workspace/traffic_light/output/facebook/detr-resnet-50/v2/best.pth"
+        "--ckpt_path",
+        type=str,
+        default="/workspace/traffic_light/output/facebook/detr-resnet-50/v2/best.pth",
     )
     parser.add_argument(
         "--result_dir", type=str, default="../Result/detect/predictions/v1"
     )
     parser.add_argument(
-        "--img_dir", type=str, default="/workspace/traffic_light/data/detection/test/images"
+        "--img_dir",
+        type=str,
+        default="/workspace/traffic_light/data/detection/test/images",
     )
     parser.add_argument("--threshold", type=float, default=0.5)
     args = parser.parse_args()
