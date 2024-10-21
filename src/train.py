@@ -103,7 +103,7 @@ def validation(
 
 
 def run_pytorch(
-    root_dir, model_name, ckpt_path, batch_size=1, epoch=1, early_patience=5
+    root_dir, model_name, output_dir, resume_from, batch_size=1, epoch=1, early_patience=5, cuda=0,
 ) -> None:
     """
     학습 파이토치 파이프라인
@@ -111,10 +111,22 @@ def run_pytorch(
     :param configs: 학습에 사용할 config
     :type configs: dict
     """
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    model = get_model(model_name, device).to(
-        device
-    )  # model_name : "facebook/detr-resnet-50"
+    device = f"cuda:{cuda}" if torch.cuda.is_available() else "cpu"
+
+    if resume_from:
+        model_data =torch.load(resume_from)
+        model = get_model(model_name, device).to(
+            device
+        )   
+        model.load_state_dict(model_data['model_state_dict'])
+        model.optimizer.load_state_dict(model_data['optimizer_state_dict'])
+        start_epoch = model_data['epoch'] + 1
+
+    else:
+        model = get_model(model_name, device).to(
+            device
+        )  # model_name : "facebook/detr-resnet-50"
+        start_epoch = 0 
 
     train_dataset = TrafficLightDataset(
         root_dir,
@@ -145,7 +157,7 @@ def run_pytorch(
     train_loader = DataLoader(
         train_dataset(train_augments_for_huggingface),
         batch_size=batch_size,
-        num_workers=multiprocessing.cpu_count() // 2,
+        num_workers=multiprocessing.cpu_count() // 4,
         shuffle=True,
         collate_fn=collate_fn,
     )
@@ -153,20 +165,20 @@ def run_pytorch(
     val_loader = DataLoader(
         val_dataset(val_augments_for_huggingface),
         batch_size=batch_size,
-        num_workers=multiprocessing.cpu_count() // 2,
+        num_workers=multiprocessing.cpu_count() // 4,
         shuffle=False,
         collate_fn=collate_fn,
     )
 
     # pre-trained model freezing
-    for param in model.parameters():
-        param.requires_grad = False
-    for param in model.class_labels_classifier.parameters():
-        param.requires_grad = True
-    for param in model.bbox_predictor.parameters():
-        param.requires_grad = True
+    # for param in model.parameters():
+    #     param.requires_grad = False
+    # for param in model.class_labels_classifier.parameters():
+    #     param.requires_grad = True
+    # for param in model.bbox_predictor.parameters():
+    #     param.requires_grad = True
 
-    save_dir = os.path.join(ckpt_path, str(model_name))
+    save_dir = os.path.join(output_dir, str(model_name))
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
@@ -188,7 +200,7 @@ def run_pytorch(
     best_loss = 1e10000
     cnt = 0
 
-    for e in range(epoch):
+    for e in range(start_epoch, epoch):
         print(f"Epoch {e+1}\n-------------------------------")
         train(train_loader, device, model, e + 1)  # optimizer, scheduler,
         val_loss = validation(val_loader, save_dir, model, device, e + 1)
@@ -223,20 +235,26 @@ if __name__ == "__main__":
         "--root_dir", type=str, default="/workspace/traffic_light/data/detection/"
     )
     parser.add_argument(
-        "--ckpt_path", type=str, default="/workspace/traffic_light/output"
+        "--output_dir", type=str, default="/workspace/traffic_light/output"
+    )
+    parser.add_argument(
+        "--resume_from", type=str, default= None  # "/workspace/traffic_light/output/facebook/detr-resnet-101/v2/best.pth"
     )
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--epoch", type=int, default=1)
     parser.add_argument("--early_patience", type=int, default=5)
+    parser.add_argument("--cuda", type=int, default=0)
     args = parser.parse_args()
 
     run_pytorch(
         args.root_dir,
         args.model_name,
-        args.ckpt_path,
+        args.output_dir,
+        args.resume_from,
         args.batch_size,
         args.epoch,
         args.early_patience,
+        args.cuda,
     )
     # val_augments_for_huggingface = A.Compose([
     #     A.RandomScale(scale_limit=0.2, p=1.0),
