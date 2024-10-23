@@ -103,7 +103,14 @@ def validation(
 
 
 def run_pytorch(
-    root_dir, model_name, output_dir, resume_from, batch_size=1, epoch=1, early_patience=5, cuda=0,
+    root_dir,
+    model_name,
+    output_dir,
+    resume_from,
+    batch_size=1,
+    epoch=1,
+    early_patience=5,
+    cuda=0,
 ) -> None:
     """
     학습 파이토치 파이프라인
@@ -114,19 +121,17 @@ def run_pytorch(
     device = f"cuda:{cuda}" if torch.cuda.is_available() else "cpu"
 
     if resume_from:
-        model_data =torch.load(resume_from)
-        model = get_model(model_name, device).to(
-            device
-        )   
-        model.load_state_dict(model_data['model_state_dict'])
-        model.optimizer.load_state_dict(model_data['optimizer_state_dict'])
-        start_epoch = model_data['epoch'] + 1
+        model_data = torch.load(resume_from)
+        model = get_model(model_name, device).to(device)
+        model.load_state_dict(model_data["model_state_dict"])
+        model.optimizer.load_state_dict(model_data["optimizer_state_dict"])
+        start_epoch = model_data["epoch"] + 1
 
     else:
         model = get_model(model_name, device).to(
             device
         )  # model_name : "facebook/detr-resnet-50"
-        start_epoch = 0 
+        start_epoch = 0
 
     train_dataset = TrafficLightDataset(
         root_dir,
@@ -238,7 +243,9 @@ if __name__ == "__main__":
         "--output_dir", type=str, default="/workspace/traffic_light/output"
     )
     parser.add_argument(
-        "--resume_from", type=str, default= None  # "/workspace/traffic_light/output/facebook/detr-resnet-101/v2/best.pth"
+        "--resume_from",
+        type=str,
+        default=None,  # "/workspace/traffic_light/output/facebook/detr-resnet-101/v2/best.pth"
     )
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--epoch", type=int, default=1)

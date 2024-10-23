@@ -143,6 +143,7 @@ class TrafficLightDataset(Dataset):
         # data cleansing
         if index == 26573:
             del bboxes[2]
+            del labels[2]
 
         if self.transform is not None:
             transformed = self.transform(image=image, bboxes=bboxes, labels=labels)

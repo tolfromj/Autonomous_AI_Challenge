@@ -19,8 +19,8 @@ def get_file_extension(filename):
 
 
 def main(model_name, ckpt_path, result_dir, img_dir, threshold=0.5):
-
-    model = get_model(model_name, "cpu").to("cpu")
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    model = get_model(model_name, device).to(device)
     model.load_state_dict(torch.load(ckpt_path)["model_state_dict"])
     model.eval()
 
@@ -59,8 +59,8 @@ def main(model_name, ckpt_path, result_dir, img_dir, threshold=0.5):
 
             # image pre-processing
             input = image_processor(images=image)
-            pixel_values = torch.tensor(input["pixel_values"])
-            target = {"pixel_mask": torch.tensor(input["pixel_mask"])}
+            pixel_values = torch.tensor(input["pixel_values"]).to(device)
+            target = {"pixel_mask": torch.tensor(input["pixel_mask"]).to(device)}
 
             # inference
             outputs = model(pixel_values, target)  # pixel_value, pixel_mask
@@ -70,14 +70,14 @@ def main(model_name, ckpt_path, result_dir, img_dir, threshold=0.5):
             # post-processing
             prob = F.softmax(logits, -1)
             scores, labels = prob[..., :-1].max(-1)  # cx, cy, w, h : [0,1]
-            scale_fct = torch.tensor([width, height, width, height])
-            boxes = pred_boxes * scale_fct
+            # scale_fct = torch.tensor([width, height, width, height]).to(device)
+            # boxes = pred_boxes * scale_fct
 
             # filtering with threshold
-            mask = scores > threshold
+            mask = (scores > threshold).to(device)
             scores = scores[mask]
             labels = labels[mask]
-            boxes = boxes[mask]
+            boxes = pred_boxes[mask]
 
             num_obj = len(scores)
 
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ckpt_path",
         type=str,
-        default="/workspace/traffic_light/output/facebook/detr-resnet-50/v2/best.pth",
+        default="/workspace/traffic_light/output/facebook/detr-resnet-101/v4/best.pth",
     )
     parser.add_argument(
         "--result_dir", type=str, default="../Result/detect/predictions/v1"
@@ -112,4 +112,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     threshold = 0.5
-    main(args.odel_name, args.ckpt_path, args.result_dir, args.img_dir, args.threshold)
+    main(args.model_name, args.ckpt_path, args.result_dir, args.img_dir, args.threshold)

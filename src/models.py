@@ -14,6 +14,26 @@ from transformers.models.detr.modeling_detr import (
 from ultralytics import YOLO
 
 
+from transformers import Swinv2Config, Swinv2Model
+
+# Initializing a Swinv2 microsoft/swinv2-tiny-patch4-window8-256 style configuration
+configuration = Swinv2Config()
+
+# Initializing a model (with random weights) from the microsoft/swinv2-tiny-patch4-window8-256 style configuration
+model = Swinv2Model(configuration)
+
+# Accessing the model configuration
+configuration = model.config
+
+
+class HuggingfaceSwinV2Model(nn.Module):
+    def __init__(self, chkpt, device):
+        super().__init__()
+        self.configuration = Swinv2Config()
+        self.model = Swinv2Model(configuration)
+        configuration = model.config
+
+
 def get_model(model_name: str, device: str) -> nn.Module:
     if model_name in ["facebook/detr-resnet-50", "facebook/detr-resnet-101"]:
         return HuggingfaceDetrModel(model_name, device)
