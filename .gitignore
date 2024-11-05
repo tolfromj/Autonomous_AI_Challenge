@@ -14,3 +14,5 @@ traffic_transformer/pred_ensemble
 traffic_transformer/work_dirs
 traffic_transformer/*.egg-info
 ultra/icons
+src/test.ipynb
+*.pyc
