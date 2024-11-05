@@ -4,3 +4,13 @@ poetry.lock
 data
 output/
 ultra/Result
+results
+submission
+verification
+traffic_transformer.zip
+traffic_transformer/datasets
+traffic_transformer/outputs
+traffic_transformer/pred_ensemble
+traffic_transformer/work_dirs
+traffic_transformer/*.egg-info
+ultra/icons
