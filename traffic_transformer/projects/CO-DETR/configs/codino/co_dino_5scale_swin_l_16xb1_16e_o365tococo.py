@@ -3,6 +3,27 @@ _base_ = ['co_dino_5scale_r50_8xb2_1x_coco.py']
 pretrained = 'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_large_patch4_window12_384_22k.pth'  # noqa
 load_from = 'https://download.openmmlab.com/mmdetection/v3.0/codetr/co_dino_5scale_swin_large_16e_o365tococo-614254c9.pth'  # noqa
 
+data_root = './datasets/data_traffic/'  # path/to/dataset e.g) ./datasets/data_traffic/ <- 마지막에 슬래쉬 꼭 넣을 것.
+
+metainfo = {
+    'classes' : (
+        "veh_go",
+        "veh_goLeft",
+        "veh_noSign",
+        "veh_stop",
+        "veh_stopLeft",
+        "veh_stopWarning",
+        "veh_warning",
+        "ped_go",
+        "ped_noSign",
+        "ped_stop",
+        "bus_go",
+        "bus_noSign",
+        "bus_stop",
+        "bus_warning",
+    )
+}
+
 # model settings
 model = dict(
     backbone=dict(
@@ -83,9 +104,6 @@ train_pipeline = [
     dict(type='PackDetInputs')
 ]
 
-train_dataloader = dict(
-    batch_size=1, num_workers=1, dataset=dict(pipeline=train_pipeline))
-
 test_pipeline = [
     dict(type='LoadImageFromFile'),
     dict(type='Resize', scale=(2048, 1280), keep_ratio=True),
@@ -96,8 +114,37 @@ test_pipeline = [
                    'scale_factor'))
 ]
 
-val_dataloader = dict(dataset=dict(pipeline=test_pipeline))
-test_dataloader = val_dataloader
+train_dataloader = dict(
+    batch_size=1,
+    num_workers=2,
+    dataset=dict(
+        data_root=data_root,
+        ann_file='train/train.json',  # 경로 주의
+        data_prefix=dict(img='train/images/'),  # 경로 주의
+        pipeline=train_pipeline,))
+
+val_dataloader = dict(
+    dataset=dict(
+        data_root=data_root,
+        metainfo=metainfo,
+        ann_file='val/val.json',  # 경로 주의
+        data_prefix=dict(img='val/images/'),  # 경로 주의
+        pipeline=test_pipeline,))
+
+# test_dataloader = val_dataloader
+test_dataloader = dict(
+    dataset=dict(
+        data_root=data_root,
+        ann_file='test/test.json',  # 경로 주의
+        data_prefix=dict(img='test/images/'),  # 경로 주의
+        pipeline=test_pipeline))
+
+val_evaluator = dict(
+    ann_file=data_root + 'val/val.json',)  # 경로 주의
+
+test_evaluator = dict(
+    ann_file=data_root + 'test/test.json',  # 경로 주의
+    outfile_prefix='./work_dirs/co_detr_test')  # 경로 주의
 
 optim_wrapper = dict(optimizer=dict(lr=1e-4))
 

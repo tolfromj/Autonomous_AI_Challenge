@@ -1,5 +1,5 @@
 _base_ = [
-    '../_base_/datasets/coco_panoptic.py', '../_base_/default_runtime.py'
+    '../_base_/datasets/coco_instance.py', '../_base_/default_runtime.py'
 ]
 image_size = (1024, 1024)
 batch_augments = [
@@ -25,7 +25,7 @@ data_preprocessor = dict(
     batch_augments=batch_augments)
 
 num_things_classes = 80
-num_stuff_classes = 53
+num_stuff_classes = 0
 num_classes = num_things_classes + num_stuff_classes
 model = dict(
     type='Mask2Former',
@@ -134,7 +134,7 @@ model = dict(
             ]),
         sampler=dict(type='MaskPseudoSampler')),
     test_cfg=dict(
-        panoptic_on=True,
+        panoptic_on=False,#True,
         # For now, the dataset does not support
         # evaluating semantic segmentation metric.
         semantic_on=False,
@@ -179,11 +179,11 @@ train_pipeline = [
 train_dataloader = dict(dataset=dict(pipeline=train_pipeline))
 
 val_evaluator = [
-    dict(
-        type='CocoPanopticMetric',
-        ann_file=data_root + 'annotations/panoptic_val2017.json',
-        seg_prefix=data_root + 'annotations/panoptic_val2017/',
-        backend_args={{_base_.backend_args}}),
+    # dict(
+    #     type='CocoPanopticMetric',
+    #     ann_file=data_root + 'annotations/panoptic_val2017.json',
+    #     seg_prefix=data_root + 'annotations/panoptic_val2017/',
+    #     backend_args={{_base_.backend_args}}),
     dict(
         type='CocoMetric',
         ann_file=data_root + 'annotations/instances_val2017.json',

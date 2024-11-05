@@ -1,6 +1,7 @@
-_base_ = ['./mask2former_swin-b-p4-w12-384_8xb2-lsj-50e_coco-panoptic.py']
-pretrained = 'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_large_patch4_window12_384_22k.pth'  # noqa
+_base_ = '../convnext/cascade-mask-rcnn_convnext-t-p4-w7_fpn_4conv1fc-giou_amp-ms-crop-3x_coco.py'  # noqa
 
+# please install mmpretrain
+# import mmpretrain.models to trigger register_module in mmpretrain
 dataset_type = 'CocoInsDataset'
 data_root = '/workspace/traffic_light/data/segmentation_coco/'
 metainfo = {
@@ -108,18 +109,14 @@ metainfo = {
         (65, 70, 15), (127, 167, 115), (59, 105, 106), (142, 108, 45),
         (196, 172, 0), (95, 54, 80), (128, 76, 255), (201, 57, 1),
         (246, 0, 122), (191, 162, 208)
-]}
+    ]}
 
-model = dict(
-    backbone=dict(
-        embed_dims=192,
-        num_heads=[6, 12, 24, 48],
-        init_cfg=dict(type='Pretrained', checkpoint=pretrained)),
-    panoptic_head=dict(num_queries=200, in_channels=[192, 384, 768, 1536]))
+custom_imports = dict(
+    imports=['mmpretrain.models'], allow_failed_imports=False)
+checkpoint_file = 'https://download.openmmlab.com/mmclassification/v0/convnext/downstream/convnext-small_3rdparty_32xb128-noema_in1k_20220301-303e75e3.pth'  # noqa
 
-# train_dataloader = dict(batch_size=1, num_workers=1)
 train_dataloader = dict(
-    batch_size=2,
+    batch_size=12,
     num_workers=2,
     dataset=dict(
         data_root=data_root,
@@ -136,35 +133,53 @@ val_dataloader = dict(
         data_prefix=dict(img='images/val2')
     ))
 
+test_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(type='Resize', scale=(1333, 800), keep_ratio=True),
+    # If you don't have a gt annotation, delete the pipeline
+    dict(type='LoadAnnotations', with_bbox=True),
+    dict(type='PackDetInputs')]
+
 test_dataloader = dict(
     batch_size=1,
     num_workers=2,
+    persistent_workers=True,
+    drop_last=False,
+    sampler=dict(type='DefaultSampler', shuffle=False),
     dataset=dict(
         type=dataset_type,
         data_root=data_root,
         ann_file='labels/test.json',
         data_prefix=dict(img='images/test'),
         test_mode=True,
-        ))
+        pipeline=test_pipeline))
 
 val_evaluator = dict(
     ann_file=data_root + 'labels/val2.json',)
 
 test_evaluator = dict(
+    type='CocoMetric',
     format_only=True,
     ann_file=data_root + 'labels/test.json',
     outfile_prefix='./work_dirs/segmentation/test')
 
-# learning policy
-max_iters = 737500
-param_scheduler = dict(end=max_iters, milestones=[655556, 710184])
+model = dict(
+    backbone=dict(
+        _delete_=True,
+        type='mmpretrain.ConvNeXt',
+        arch='small',
+        out_indices=[0, 1, 2, 3],
+        drop_path_rate=0.6,
+        layer_scale_init_value=1.0,
+        gap_before_final_norm=False,
+        init_cfg=dict(
+            type='Pretrained', checkpoint=checkpoint_file,
+            prefix='backbone.')))
 
-# Before 735001th iteration, we do evaluation every 5000 iterations.
-# After 735000th iteration, we do evaluation every 737500 iterations,
-# which means that we do evaluation at the end of training.'
-interval = 5000
-dynamic_intervals = [(max_iters // interval * interval + 1, max_iters)]
-train_cfg = dict(
-    max_iters=max_iters,
-    val_interval=interval,
-    dynamic_intervals=dynamic_intervals)
+
+
+optim_wrapper = dict(paramwise_cfg={
+    'decay_rate': 0.7,
+    'decay_type': 'layer_wise',
+    'num_layers': 12
+})

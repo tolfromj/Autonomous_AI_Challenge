@@ -19,8 +19,8 @@ from mmdet.utils import setup_cache_size_limit_of_dynamo
 def parse_args():
     parser = argparse.ArgumentParser(
         description='MMDet test (and eval) a model')
-    parser.add_argument('--config', help='test config file path', default= "configs/traffic_light/dino_swin.py")
-    parser.add_argument('--checkpoint', help='checkpoint file', default = "work_dirs/dino_swin/epoch_4.pth")
+    parser.add_argument('--config', help='test config file path', default= "projects/CO-DETR/configs/codino/co_dino_5scale_swin_l_16xb1_16e_o365tococo.py")
+    parser.add_argument('--checkpoint', help='checkpoint file', default = "work_dirs/co_dino_5scale_swin_l_16xb1_16e_o365tococo/epoch_3.pth")
     parser.add_argument(
         '--work-dir',
         help='the directory to save the file containing evaluation metrics')
@@ -28,7 +28,7 @@ def parse_args():
         '--out',
         type=str,
         help='dump predictions to a pickle file for offline evaluation',
-        default='outputs/epoch_4_test.pkl')
+        default='outputs/epoch_3_co_detr.pkl')
     parser.add_argument(
         '--show', action='store_true', help='show prediction results')
     parser.add_argument(
