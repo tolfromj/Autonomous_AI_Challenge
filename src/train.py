@@ -12,7 +12,19 @@ import albumentations as A
 from models import get_model
 from datasets import TrafficLightDataset
 from utils.collate_fn import get_collate
+from utils.compute_metrics import compute_metrics
+import random
+import numpy as np
+import torch
 
+def set_random_seed(seed):
+    random.seed(seed)  # Python random seed 설정
+    np.random.seed(seed)  # NumPy random seed 설정
+    torch.manual_seed(seed)  # PyTorch CPU seed 설정
+    torch.cuda.manual_seed(seed)  # PyTorch GPU seed 설정
+    torch.cuda.manual_seed_all(seed)  # 여러 GPU를 사용하는 경우 모두 설정
+    torch.backends.cudnn.deterministic = True  # 연산의 결정론적 동작 설정
+    torch.backends.cudnn.benchmark = False  # 성능을 약간 희생하고 완벽한 재현성을 보장
 
 # def train() -> None:
 def train(
@@ -49,7 +61,8 @@ def train(
         # log_term = 100  # len(dataloader) // 5
         # if (batch_idx + 1) % log_term == 0:
         # train_loss = val_loss / log_term
-
+        # if batch_idx==31:
+        #     break
     print(
         f"Epoch[{epoch}]({batch_idx + 1}/{len(dataloader)}) "
         f"| lr {model.learning_rate} \n train loss {train_loss:4.4}"
@@ -80,9 +93,11 @@ def validation(
     valid_loss = []
 
     print("start validataion ...")
+    metrics={}
     with torch.no_grad():
         for batch_idx, (images, targets) in enumerate(tqdm(dataloader)):
-
+            # if batch_idx == 100:
+            #     break
             # setting device
             images = images.to(device)
             if "pixel_mask" in targets.keys():  # detr에 경우.
@@ -93,8 +108,19 @@ def validation(
 
             outputs = model(images, targets)
             loss = outputs["loss"]  # loss : torch.Tensor
-            valid_loss.append(loss.cpu().numpy())
 
+            logits = outputs["logits"]
+            pred_boxes = outputs["pred_boxes"]
+            
+            if batch_idx == len(dataloader) - 1:
+                metrics=compute_metrics(logits, pred_boxes, targets["labels"], compute_result=True)
+            else: 
+                metrics=compute_metrics(logits, pred_boxes, targets["labels"], compute_result=False)
+            
+            valid_loss.append(loss.cpu().numpy())
+    print('mAP: ', metrics['mAP'], ' ',
+                  'mAP_50: ', metrics['mAP_50'], ' ',
+                  'mAP_75: ', metrics['mAP_75'])
     val_loss = np.sum(valid_loss) / len(dataloader)
 
     print(f"Epoch[{epoch}]({len(dataloader)})" f"valid loss {val_loss:4.4}")
@@ -139,7 +165,7 @@ def run_pytorch(
         image_processor=model_name,  # root_dir; "/workspace/traffic_light/data/detection/"
     )
     val_dataset = TrafficLightDataset(root_dir, mode="val", image_processor=model_name)
-    collate_fn = get_collate(model_name, device)
+    collate_fn = get_collate(model_name)
     train_augments_for_huggingface = A.Compose(
         [
             # A.RandomScale(scale_limit=0.2, p=1.0),
@@ -218,7 +244,7 @@ def run_pytorch(
                     "optimizer_state_dict": model.optimizer.state_dict(),
                     "loss": val_loss,
                 },
-                f"{save_dir}/best.pth",
+                f"{save_dir}/best_{e}.pth",
             )
             print(
                 f"Saved best_loss Model to {save_dir}/best.pth ({e}/{epoch}-{val_loss:4.4})"
@@ -234,6 +260,8 @@ def run_pytorch(
 
 
 if __name__ == "__main__":
+    set_random_seed(42)
+    
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, default="facebook/detr-resnet-101")
     parser.add_argument(
