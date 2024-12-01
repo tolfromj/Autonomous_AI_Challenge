@@ -5,10 +5,13 @@ from torch import nn
 from typing import Dict, List, Optional, Tuple, Union
 
 from transformers import DetrConfig, DetrForObjectDetection, DetrModel
+from transformers.loss.loss_for_object_detection import ImageLoss, HungarianMatcher
 from transformers.models.detr.modeling_detr import (
-    DetrLoss,
+
+    # DetrLoss,
     DetrMLPPredictionHead,
-    DetrHungarianMatcher,
+    DetrPreTrainedModel,
+    # DetrHungarianMatcher,
 )
 
 from ultralytics import YOLO
@@ -36,32 +39,32 @@ class HuggingfaceSwinV2Model(nn.Module):
 
 def get_model(model_name: str, device: str) -> nn.Module:
     if model_name in ["facebook/detr-resnet-50", "facebook/detr-resnet-101"]:
-        return HuggingfaceDetrModel(model_name, device)
+        config = DetrConfig()
+        return HuggingfaceDetrModel(config, model_name, device)
 
 
-class HuggingfaceDetrModel(nn.Module):
-    def __init__(self, ckpt, device):
-        super().__init__()
+class HuggingfaceDetrModel(DetrPreTrainedModel):
+    def __init__(self, config:DetrConfig, ckpt, device):
+        super().__init__(config)
         self.ckpt = ckpt
-        self.device = device
         self.model = DetrModel.from_pretrained(self.ckpt)
 
         self.class_labels_classifier = nn.Linear(
-            in_features=256, out_features=15, bias=True
+            in_features=256, out_features=15#, bias=True
         )
         self.bbox_predictor = DetrMLPPredictionHead(
             input_dim=256, hidden_dim=256, output_dim=4, num_layers=3
         )
 
-        self.learning_rate = 1e-3
+        self.learning_rate = 1e-5
         self.optimizer = self.get_optimizer()
 
-        self.class_cost = 1
-        self.bbox_cost = 5
-        self.giou_cost = 2
-        self.eos_coefficient = 0.1
-        self.bbox_loss_coefficient = 5
-        self.giou_loss_coefficient = 2
+        # self.class_cost = 1
+        # self.bbox_cost = 5
+        # self.giou_cost = 2
+        # self.eos_coefficient = 0.1
+        # self.bbox_loss_coefficient = 5
+        # self.giou_loss_coefficient = 2
 
     def forward(
         self,
@@ -133,17 +136,17 @@ class HuggingfaceDetrModel(nn.Module):
         loss, loss_dict = None, None  # , auxiliary_outputs = None, None, None
         if labels is not None:
             # First: create the matcher
-            matcher = DetrHungarianMatcher(
-                class_cost=self.class_cost,
-                bbox_cost=self.bbox_cost,
-                giou_cost=self.giou_cost,
+            matcher = HungarianMatcher(
+                class_cost=self.config.class_cost,
+                bbox_cost=self.config.bbox_cost,
+                giou_cost=self.config.giou_cost,
             )
             # Second: create the criterion
             losses = ["labels", "boxes", "cardinality"]
-            criterion = DetrLoss(
+            criterion = ImageLoss(
                 matcher=matcher,
                 num_classes=14,
-                eos_coef=self.eos_coefficient,
+                eos_coef=self.config.eos_coefficient,
                 losses=losses,
             )
             criterion.to(self.device)
@@ -151,6 +154,10 @@ class HuggingfaceDetrModel(nn.Module):
             outputs_loss = {}
             outputs_loss["logits"] = logits
             outputs_loss["pred_boxes"] = pred_boxes
+            # print(pred_boxes[0][0][:])
+            # print(pred_boxes[0][0][0].item())
+            if torch.isnan(pred_boxes[0][0][0]):
+                print(labels[0]['image_id'])
             # if self.config.auxiliary_loss:
             #     intermediate = outputs.intermediate_hidden_states if return_dict else outputs[4]
             #     outputs_class = self.class_labels_classifier(intermediate)
@@ -161,8 +168,8 @@ class HuggingfaceDetrModel(nn.Module):
             loss_dict = criterion(outputs_loss, labels)
 
             # Fourth: compute total loss, as a weighted sum of the various losses
-            weight_dict = {"loss_ce": 1, "loss_bbox": self.bbox_loss_coefficient}
-            weight_dict["loss_giou"] = self.giou_loss_coefficient
+            weight_dict = {"loss_ce": 1, "loss_bbox": self.config.bbox_loss_coefficient}
+            weight_dict["loss_giou"] = self.config.giou_loss_coefficient
             # if self.config.auxiliary_loss:
             #     aux_weight_dict = {}
             #     for i in range(self.config.decoder_layers - 1):
